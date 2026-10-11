@@ -1,6 +1,6 @@
-<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Casa VR · V(0.2)</title>
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Granny VR Cardboard · V(0.4)</title>
 <style>html,body{margin:0;height:100%;background:#000;color:#fff;font:16px sans-serif;overflow:hidden}canvas{display:block}#ui{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#000e;text-align:center;padding:16px;z-index:5}button{font-size:18px;padding:12px 20px;border:0;border-radius:8px}.h{position:fixed;top:10px;transform:translateX(-50%);font-size:14px;text-align:center;pointer-events:none;text-shadow:0 0 4px #000;width:40%;white-space:pre-line}</style></head><body>
-<div id="ui"><h2>Casa VR <small style="font-size:14px;color:#9ee7bd">V(0.2)</small></h2><div style="max-width:340px;font-size:13px;opacity:.85">Actualización 0.2 · objetos interactivos y cajones</div><div id="msg">Cargando casa…</div><div id="st" style="font-size:14px"></div><select id="rm" style="font-size:18px;padding:8px"><option value="1">Planta alta · derecha</option><option value="2">Planta alta · izquierda (habitación 2)</option><option value="3">Planta alta · izquierda (habitación 3)</option><option value="4">Planta baja · sala</option></select><button id="go" disabled>Jugar</button><button id="hb">Activar manos (cámara)</button><button id="tb">Probar manos (test)</button><div style="max-width:340px;font-size:12px;opacity:.7">Informe de desarrollo · V(0.2): limpieza de indicaciones A/B, menú versionado y primera base de interacción.</div></div>
+<div id="ui"><h2>Casa VR <small style="font-size:14px;color:#9ee7bd">V(0.4)</small></h2><div style="max-width:340px;font-size:13px;opacity:.85">Movimiento con joystick derecho · un único punto de inicio</div><div id="msg">Cargando casa…</div><div id="st" style="font-size:14px"></div><button id="go" disabled>Jugar</button><button id="hb">Activar manos (cámara)</button><button id="tb">Probar manos (test)</button><div style="max-width:340px;font-size:12px;opacity:.7">Informe de desarrollo · V(0.4): joystick derecho y un único punto de inicio predeterminado.</div></div>
 <div id="tst" style="display:none;position:fixed;inset:0;z-index:9;background:#000"><video id="tv" playsinline muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain"></video><canvas id="tc" style="position:absolute;inset:0;width:100%;height:100%"></canvas><div id="ts" style="position:absolute;top:8px;left:0;right:0;text-align:center;font-size:18px;text-shadow:0 0 4px #000"></div><button id="tx" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%)">Salir del test</button></div>
 <div class="h" style="left:25%"></div><div class="h" style="left:75%"></div><button id="act" style="display:none;position:fixed;right:5%;bottom:12%;z-index:4;border-radius:50%;width:88px;height:88px;background:#d9d1b4;color:#17130e;font-weight:bold;border:3px solid #6b5b42;box-shadow:0 3px 12px #0009;touch-action:manipulation">TOMAR /<br>USAR</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -57,8 +57,10 @@ function free(x,fy,z){const o=new THREE.Vector3(x,fy+.4,z),o2=new THREE.Vector3(
  if(hit(o,new THREE.Vector3(0,1,0),2).length)return false;
  const g=hit(new THREE.Vector3(x,fy+1,z),new THREE.Vector3(0,-1,0),2);return g.length>0&&Math.abs(g[0].point.y-fy)<.25}
 function findFree(x,fy,z){for(let R=0;R<=5;R+=.4){const n=R?Math.ceil(R*10):1;for(let a=0;a<n;a++){const t=a/n*6.283,px=x+Math.cos(t)*R,pz=z+Math.sin(t)*R;if(free(px,fy,pz))return[px,pz,true]}}return[x,z,false]}
-function spawn(r){const S=.4,P={1:[10,-2.1,22],2:[-14.5,-2.1,14],3:[-14.5,-2.1,29],4:[-1,-8.8,14]},p=P[r]||P[1],fy=p[1]*S,q=[p[0]*S,p[2]*S];
- rig.position.set(q[0],fy,q[1]);granny.position.set(-18.8*S,-8.8*S,27.5*S);bedOK=q[2]}
+function spawn(){const S=.4;
+ // Único punto de inicio: la ubicación predeterminada que ya usaba esta recreación.
+ const p=[10,-2.1,22],fy=p[1]*S,q=[p[0]*S,p[2]*S];
+ rig.position.set(q[0],fy,q[1]);granny.position.set(-18.8*S,-8.8*S,27.5*S);bedOK=q[1]}
 addEventListener('touchmove',e=>{const t=e.touches[0];if(lx!==undefined){drag.x-=(t.clientX-lx)*.005;drag.y=Math.max(-1.4,Math.min(1.4,drag.y-(t.clientY-ly)*.005))}lx=t.clientX;ly=t.clientY});
 addEventListener('touchend',()=>lx=undefined);
 setInterval(()=>$('#st').textContent=(isSecureContext?'':'⚠ Sin https: Chrome bloquea giroscopio y cámara. ')+'Giroscopio: '+(dev&&dev.alpha!=null?'OK':'sin señal (puedes mirar arrastrando el dedo)'),500);
@@ -94,8 +96,8 @@ function interact(){if(!playing||dead)return;
 // ---- mandos
 const pads=()=>[...(navigator.getGamepads?navigator.getGamepads():[])].filter(Boolean);
 const waitBtn=()=>new Promise(r=>{const t=setInterval(()=>{for(const p of pads())for(let i=0;i<p.buttons.length;i++)if(p.buttons[i].pressed){clearInterval(t);r(i)}},50);document.body.addEventListener('click',()=>{clearInterval(t);r(null)},{once:true})});
-async function calibrar(){msg.textContent='Presiona en el Joy-Con el botón para AGACHARTE (o toca la pantalla para usar el predeterminado)';let k=await waitBtn();if(k!=null)map.crouch=k;
- await new Promise(r=>setTimeout(r,600));msg.textContent='Ahora el botón para INTERACTUAR (o toca la pantalla)';k=await waitBtn();if(k!=null)map.use=k;await new Promise(r=>setTimeout(r,400))}
+async function calibrar(){msg.textContent='Pulsa un botón del Joy-Con para AGACHARTE (o toca la pantalla para mantener el predeterminado)';let k=await waitBtn();if(k!=null)map.crouch=k;
+ await new Promise(r=>setTimeout(r,600));msg.textContent='Ahora pulsa el botón del Joy-Con para INTERACTUAR (o toca la pantalla)';k=await waitBtn();if(k!=null)map.use=k;await new Promise(r=>setTimeout(r,400))}
 
 // ---- manos (cámara trasera, pinza = interactuar)
 let HH=null,hv=null,testOn=false;
@@ -123,7 +125,7 @@ $('#act').addEventListener('pointerdown',e=>{e.preventDefault();interact()});
 // ---- iniciar
 go.onclick=async()=>{audioInit();try{await document.documentElement.requestFullscreen();await screen.orientation.lock('landscape')}catch(e){}
  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}
- $('#hb').style.display=$('#tb').style.display=go.style.display=$('#rm').style.display=$('#st').style.display='none';spawn(+$('#rm').value);await calibrar();$('#ui').style.display='none';playing=true;$('#act').style.display='block';hud('Apunta al objeto y pulsa TOMAR / USAR');
+ $('#hb').style.display=$('#tb').style.display=go.style.display=$('#st').style.display='none';spawn();await calibrar();$('#ui').style.display='none';playing=true;$('#act').style.display='block';hud('Apunta al objeto y pulsa TOMAR / USAR');
  addEventListener('click',()=>{if(dev&&dev.alpha!=null){const q=new THREE.Quaternion(),o=(screen.orientation?screen.orientation.angle:0)*Math.PI/180;setQ(q,dev.alpha,dev.beta,dev.gamma,o);eu.setFromQuaternion(q,'YXZ');rig.rotation.y=-eu.y}});
  last=performance.now();loop()};
 function setQ(q,a,b,g,o){const r=Math.PI/180;eu.set(b*r,a*r,-g*r,'YXZ');q.setFromEuler(eu);q.multiply(q1);q.multiply(q0.setFromAxisAngle(zee,-o))}
@@ -152,7 +154,7 @@ let last=0;
 function loop(){requestAnimationFrame(loop);const now=performance.now(),raw=(now-last)/1e3,dt=Math.min(.05,raw);last=now;fpsT+=raw;fpsN++;if(fpsT>2){const f=fpsN/fpsT;fpsT=fpsN=0;const np=f<22?Math.max(.5,pr-.15):(f>50?Math.min(1.25,pr+.1):pr);if(np!==pr){pr=np;R.setPixelRatio(pr);R.setSize(innerWidth,innerHeight)}}if(now-(loop.t||0)>500){loop.t=now;const p=rig.position;dbg='';}
  if(dev&&dev.alpha!=null){const o=(screen.orientation?screen.orientation.angle:0)*Math.PI/180;setQ(head.quaternion,dev.alpha,dev.beta,dev.gamma,o)}else head.rotation.set(drag.y,drag.x,0)
  let moving=false,gd=99;if(!dead){let ax=0,ay=0,cr=false,use=false;
-  for(const p of pads()){if(Math.abs(p.axes[0])>.2||Math.abs(p.axes[1])>.2){ax=p.axes[0];ay=p.axes[1]}
+  for(const p of pads()){if(p.axes&&p.axes.length>=2){let x=p.axes[0]||0,y=p.axes[1]||0;const dz=.16;ax=Math.abs(x)>dz?Math.sign(x)*(Math.abs(x)-dz)/(1-dz):0;ay=Math.abs(y)>dz?Math.sign(y)*(Math.abs(y)-dz)/(1-dz):0;}
    if(p.buttons[map.crouch]&&p.buttons[map.crouch].pressed)cr=true;if(p.buttons[map.use]&&p.buttons[map.use].pressed)use=true}
   if(use&&!prevUse)interact();prevUse=use;crouch=cr;
   const th=crouch?1:1.6;eyeH+=(th-eyeH)*Math.min(1,dt*8);
