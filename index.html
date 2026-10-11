@@ -2,7 +2,7 @@
 <style>html,body{margin:0;height:100%;background:#000;color:#fff;font:16px sans-serif;overflow:hidden}canvas{display:block}#ui{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#000e;text-align:center;padding:16px;z-index:5}button{font-size:18px;padding:12px 20px;border:0;border-radius:8px}.h{position:fixed;top:10px;transform:translateX(-50%);font-size:14px;text-align:center;pointer-events:none;text-shadow:0 0 4px #000;width:40%;white-space:pre-line}</style></head><body>
 <div id="ui"><h2>Casa VR <small style="font-size:14px;color:#9ee7bd">V(0.2)</small></h2><div style="max-width:340px;font-size:13px;opacity:.85">Actualización 0.2 · objetos interactivos y cajones</div><div id="msg">Cargando casa…</div><div id="st" style="font-size:14px"></div><select id="rm" style="font-size:18px;padding:8px"><option value="1">Planta alta · derecha</option><option value="2">Planta alta · izquierda (habitación 2)</option><option value="3">Planta alta · izquierda (habitación 3)</option><option value="4">Planta baja · sala</option></select><button id="go" disabled>Jugar</button><button id="hb">Activar manos (cámara)</button><button id="tb">Probar manos (test)</button><div style="max-width:340px;font-size:12px;opacity:.7">Informe de desarrollo · V(0.2): limpieza de indicaciones A/B, menú versionado y primera base de interacción.</div></div>
 <div id="tst" style="display:none;position:fixed;inset:0;z-index:9;background:#000"><video id="tv" playsinline muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain"></video><canvas id="tc" style="position:absolute;inset:0;width:100%;height:100%"></canvas><div id="ts" style="position:absolute;top:8px;left:0;right:0;text-align:center;font-size:18px;text-shadow:0 0 4px #000"></div><button id="tx" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%)">Salir del test</button></div>
-<div class="h" style="left:25%"></div><div class="h" style="left:75%"></div>
+<div class="h" style="left:25%"></div><div class="h" style="left:75%"></div><button id="act" style="display:none;position:fixed;right:5%;bottom:12%;z-index:4;border-radius:50%;width:88px;height:88px;background:#d9d1b4;color:#17130e;font-weight:bold;border:3px solid #6b5b42;box-shadow:0 3px 12px #0009;touch-action:manipulation">TOMAR /<br>USAR</button>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
@@ -65,12 +65,31 @@ setInterval(()=>$('#st').textContent=(isSecureContext?'':'⚠ Sin https: Chrome 
 // ---- interactuar
 const drawerState=new WeakMap();
 function interact(){if(!playing||dead)return;
- head.getWorldPosition(V);if(handG.visible)D.copy(head.localToWorld(joints[8].position.clone())).sub(V).normalize();else cam.getWorldDirection(D);const h=hit(V.clone(),D.clone(),2.5);if(!h.length){hud('Nada aquí');return}
- const o=h[0].object,n=(o.name+' '+(o.parent?o.parent.name:''));
- if(/key|battery|spark|pepper|bom|item|pickup|collect/i.test(n)){o.visible=false;o.layers.set(1);items++;if(AC)tone(660,.15,.12,'triangle');hud('Recogiste: '+o.name.split('_')[0]+' ('+items+')')}
- else if(/drawer|caj[oó]n|tiroir/i.test(n)){const was=drawerState.has(o)?drawerState.get(o):false;drawerState.set(o,!was);o.position.z+=was?-.22:.22;if(AC)tone(120,.18,.1,'wood');hud(was?'Cajón cerrado':'Cajón abierto')}
- else if(/door|dörr|dorr/i.test(n)){o.visible=!o.visible;if(AC)tone(90,.4,.12,'sawtooth',-30);o.layers.set(o.visible?0:1);hud(o.visible?'Puerta cerrada':'Puerta abierta')}
- else hud(o.name.split('_')[0]||'Objeto');}
+ head.getWorldPosition(V);
+ if(handG.visible) D.copy(head.localToWorld(joints[8].position.clone())).sub(V).normalize(); else cam.getWorldDirection(D);
+ const h=hit(V.clone(),D.clone(),3.2);if(!h.length){hud('Acércate y apunta al objeto');return}
+ const mesh=h[0].object;
+ // Busca el objeto interactivo en sus ancestros, porque el modelo de Granny usa
+ // nombres en grupos (por ejemplo BatteryPL1 y Loda2Parent), no siempre en la malla.
+ let chain=[],q=mesh;while(q&&q!==model.parent){chain.push(q);if(q===model)break;q=q.parent}
+ const names=chain.map(x=>x.name||'').join(' ').toLowerCase();
+ const itemRe=/(key|battery|spark|pepper|bomb|bom|item|pickup|collect|hammer|melon|shotgun|vapennyckel|avbitare|birdseed|car\s*key|carkey|housekey|playhousekey|metalcan)/i;
+ const drawerRe=/(lodaparent|loda2parent|byroloda|drawer|caj[oó]n|skrivbordsloda)/i;
+ const doorRe=/(door|lucka|secretdoor|elevatordoor|metallockerdoor|bastudoor|burdoor)/i;
+ if(itemRe.test(names)){
+   const target=chain.find(x=>/^(BatteryPL|SparkPlug|Pepper|BatteryBom|CarkeyPL|HouseKeyPL|playHouseKeyPL|HanglockKeyPL|HammerPL|MelonPickUpPL|Melon$|Shotgun1_PL|AvbitarePL|BirdSeedBoxPL|MetalCan|Vapennyckel)/i.test(x.name||''))||mesh;
+   target.visible=false;target.traverse?.(x=>{x.visible=false});items++;if(AC)tone(660,.15,.12,'triangle');hud('Objeto recogido · '+items);
+ }else if(drawerRe.test(names)){
+   const target=chain.find(x=>/(lodaparent|loda2parent|drawer|caj[oó]n|skrivbordsloda)/i.test(x.name||''))||mesh;
+   const was=drawerState.get(target)||false;drawerState.set(target,!was);
+   target.traverse(x=>{x.matrixAutoUpdate=true});target.matrixAutoUpdate=true;
+   target.position.x+=was?-.28:.28;model.updateMatrixWorld(true);meshes.forEach(m=>{if(m.userData.b)m.userData.b.setFromObject(m)});
+   if(AC)tone(120,.18,.1,'wood');hud(was?'Cajón cerrado':'Cajón abierto');
+ }else if(doorRe.test(names)){
+   const target=chain.find(x=>/(secretdoor|elevatordoor|metallockerdoor|bastudoor|burdoor|door|lucka)/i.test(x.name||''))||mesh;
+   target.visible=!target.visible;if(AC)tone(90,.4,.12,'sawtooth',-30);hud(target.visible?'Puerta cerrada':'Puerta abierta');
+ }else hud('No es un objeto recogible');}
+
 
 // ---- mandos
 const pads=()=>[...(navigator.getGamepads?navigator.getGamepads():[])].filter(Boolean);
@@ -99,11 +118,12 @@ function drawTest(l){const c=$('#tc'),W=c.width=innerWidth,H=c.height=innerHeigh
 $('#hb').onclick=async()=>{try{await initHands();$('#hb').textContent='Manos activas ✓'}catch(e){$('#hb').textContent='Manos no disponibles: '+e.message+(isSecureContext?'':' (falta https)')}};
 $('#tb').onclick=async()=>{try{msg.textContent='Abriendo cámara…';await initHands();const v=$('#tv');v.srcObject=hv.srcObject;await v.play();testOn=true;$('#tst').style.display='block';$('#ts').textContent='Pon el celular horizontal y muestra tu mano a la cámara trasera';msg.textContent='Casa lista'}catch(e){msg.textContent='Cámara no disponible: '+e.message+(isSecureContext?'':' (falta https)')}};
 $('#tx').onclick=()=>{testOn=false;$('#tst').style.display='none'};
+$('#act').addEventListener('pointerdown',e=>{e.preventDefault();interact()});
 
 // ---- iniciar
 go.onclick=async()=>{audioInit();try{await document.documentElement.requestFullscreen();await screen.orientation.lock('landscape')}catch(e){}
  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}
- $('#hb').style.display=$('#tb').style.display=go.style.display=$('#rm').style.display=$('#st').style.display='none';spawn(+$('#rm').value);await calibrar();$('#ui').style.display='none';playing=true;hud('Mover: stick · botón de acción: interactuar · toca para recentrar');
+ $('#hb').style.display=$('#tb').style.display=go.style.display=$('#rm').style.display=$('#st').style.display='none';spawn(+$('#rm').value);await calibrar();$('#ui').style.display='none';playing=true;$('#act').style.display='block';hud('Apunta al objeto y pulsa TOMAR / USAR');
  addEventListener('click',()=>{if(dev&&dev.alpha!=null){const q=new THREE.Quaternion(),o=(screen.orientation?screen.orientation.angle:0)*Math.PI/180;setQ(q,dev.alpha,dev.beta,dev.gamma,o);eu.setFromQuaternion(q,'YXZ');rig.rotation.y=-eu.y}});
  last=performance.now();loop()};
 function setQ(q,a,b,g,o){const r=Math.PI/180;eu.set(b*r,a*r,-g*r,'YXZ');q.setFromEuler(eu);q.multiply(q1);q.multiply(q0.setFromAxisAngle(zee,-o))}
