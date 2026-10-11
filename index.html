@@ -1,6 +1,7 @@
 <!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Casa VR</title>
 <style>html,body{margin:0;height:100%;background:#000;color:#fff;font:16px sans-serif;overflow:hidden}canvas{display:block}#ui{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#000e;text-align:center;padding:16px;z-index:5}button{font-size:18px;padding:12px 20px;border:0;border-radius:8px}.h{position:fixed;top:10px;transform:translateX(-50%);font-size:14px;text-align:center;pointer-events:none;text-shadow:0 0 4px #000;width:40%;white-space:pre-line}</style></head><body>
-<div id="ui"><h2>Casa VR</h2><div id="msg">Cargando casa…</div><div id="st" style="font-size:14px"></div><select id="rm" style="font-size:18px;padding:8px"><option value="1">Empezar: habitación 1</option><option value="2">Empezar: habitación 2</option><option value="3">Empezar: habitación 3</option></select><button id="go" disabled>Jugar</button><button id="hb">Activar manos (cámara)</button></div>
+<div id="ui"><h2>Casa VR</h2><div id="msg">Cargando casa…</div><div id="st" style="font-size:14px"></div><select id="rm" style="font-size:18px;padding:8px"><option value="1">Planta alta · derecha</option><option value="2">Planta alta · izquierda A</option><option value="3">Planta alta · izquierda B</option><option value="4">Planta baja · sala</option></select><button id="go" disabled>Jugar</button><button id="hb">Activar manos (cámara)</button><button id="tb">Probar manos (test)</button></div>
+<div id="tst" style="display:none;position:fixed;inset:0;z-index:9;background:#000"><video id="tv" playsinline muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain"></video><canvas id="tc" style="position:absolute;inset:0;width:100%;height:100%"></canvas><div id="ts" style="position:absolute;top:8px;left:0;right:0;text-align:center;font-size:18px;text-shadow:0 0 4px #000"></div><button id="tx" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%)">Salir del test</button></div>
 <div class="h" style="left:25%"></div><div class="h" style="left:75%"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -15,6 +16,15 @@ const scene=new THREE.Scene();scene.background=new THREE.Color(0x05060a);scene.f
 scene.add(new THREE.AmbientLight(0xffffff,1.1));
 const rig=new THREE.Group(),head=new THREE.Group(),cam=new THREE.PerspectiveCamera(70,1,.05,120);
 scene.add(rig);head.rotation.order='YXZ';rig.add(head);head.add(cam);const lamp=new THREE.PointLight(0xffe0b0,1.2,9);head.add(lamp);
+// ---- mano virtual
+const handG=new THREE.Group();handG.visible=false;head.add(handG);
+const hMat=new THREE.MeshBasicMaterial({color:0xffcfa8,depthTest:false,transparent:true,opacity:.92,fog:false}),hGeo=new THREE.SphereGeometry(.012,8,6),cGeo=new THREE.CylinderGeometry(.007,.007,1,6);
+const HC=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const joints=[...Array(21)].map(()=>{const m=new THREE.Mesh(hGeo,hMat);m.renderOrder=999;handG.add(m);return m}),bones=HC.map(()=>{const m=new THREE.Mesh(cGeo,hMat);m.renderOrder=999;handG.add(m);return m});
+const UP=new THREE.Vector3(0,1,0),pa=new THREE.Vector3(),pb=new THREE.Vector3();
+function showHand(l,pinch){hMat.color.setHex(pinch?0x7dff9a:0xffcfa8);l.forEach((p,i)=>joints[i].position.set((p.x-.5)*.6,-(p.y-.5)*.45,-.5-p.z*.5));
+ HC.forEach((c,i)=>{pa.copy(joints[c[0]].position);pb.copy(joints[c[1]].position);const b=bones[i];b.position.copy(pa).add(pb).multiplyScalar(.5);const d=pb.sub(pa),len=d.length()||1e-4;b.scale.set(1,len,1);b.quaternion.setFromUnitVectors(UP,d.normalize())});handG.visible=true}
+
 let find,bedOK,grace=12,drag={x:0,y:0},lx,ly,meshes=[],model,eyeH=1.6,floorY=0,dev=null,playing=false,dead=false,items=0,map={crouch:0,use:1},prevUse=false,crouch=false;
 const RC=new THREE.Raycaster(),V=new THREE.Vector3(),D=new THREE.Vector3();
 const zee=new THREE.Vector3(0,0,1),eu=new THREE.Euler(),q0=new THREE.Quaternion(),q1=new THREE.Quaternion(-Math.sqrt(.5),0,0,Math.sqrt(.5));
@@ -28,8 +38,7 @@ new THREE.GLTFLoader().parse(bin.buffer,'',g=>{
  model=g.scene;scene.add(model);model.updateMatrixWorld(true);
  find=n=>{let r;model.traverse(o=>{if(!r&&o.name===n)r=o});return r};
  ['Slendrina','Slendrina3','Hair'].forEach(n=>{const x=find(n);x&&x.parent&&x.parent.remove(x)});
- const bb=new THREE.Box3().setFromObject(find('BedSovrum1')||model),bs=bb.getSize(new THREE.Vector3()),bl=Math.max(bs.x,bs.z)||1;
- model.scale.setScalar(2/bl);model.updateMatrixWorld(true);
+ model.scale.setScalar(.4);model.updateMatrixWorld(true);
  model.traverse(o=>{if(o.isMesh){meshes.push(o);(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>{if(m)m.side=THREE.DoubleSide})}});
  mkGranny(0,0,0);
  msg.textContent='Casa lista ('+meshes.length+' objetos)';go.disabled=false;
@@ -41,16 +50,14 @@ function mkGranny(x,y,z){granny=new THREE.Group();const m=new THREE.MeshLambertM
  const b=new THREE.Mesh(new THREE.CylinderGeometry(.3,.35,1.4,10),m);b.position.y=.7;const h=new THREE.Mesh(new THREE.SphereGeometry(.22,10,8),m);h.position.y=1.6;
  granny.add(b,h);granny.position.set(x,y,z);scene.add(granny);gy0=y}
 
-function spawn(r){const bx=n=>{const o=find(n);return o?new THREE.Box3().setFromObject(o):null};
- const b=bx('BedSovrum'+r)||bx('BedSovrum1'),k=bx('KitchenFurniture');
- bedOK=!!b&&!b.isEmpty()&&isFinite(b.min.x);if(bedOK){const c=b.getCenter(new THREE.Vector3());rig.position.set(c.x,b.max.y,c.z)}else{const m=new THREE.Box3().setFromObject(model),c=m.getCenter(new THREE.Vector3());rig.position.set(c.x,m.max.y,c.z)}
- if(k){const c=k.getCenter(new THREE.Vector3());granny.position.set(c.x,k.min.y,c.z)}}
+function spawn(r){const S=.4,P={1:[10,-2.1,22],2:[-14.5,-2.1,14],3:[-14.5,-2.1,29],4:[-1,-8.8,14]},p=P[r]||P[1];
+ rig.position.set(p[0]*S,p[1]*S,p[2]*S);granny.position.set(-18.8*S,-8.8*S,27.5*S);bedOK=true}
 addEventListener('touchmove',e=>{const t=e.touches[0];if(lx!==undefined){drag.x-=(t.clientX-lx)*.005;drag.y=Math.max(-1.4,Math.min(1.4,drag.y-(t.clientY-ly)*.005))}lx=t.clientX;ly=t.clientY});
 addEventListener('touchend',()=>lx=undefined);
 setInterval(()=>$('#st').textContent=(isSecureContext?'':'⚠ Sin https: Chrome bloquea giroscopio y cámara. ')+'Giroscopio: '+(dev&&dev.alpha!=null?'OK':'sin señal (puedes mirar arrastrando el dedo)'),500);
 // ---- interactuar
 function interact(){if(!playing||dead)return;
- head.getWorldPosition(V);cam.getWorldDirection(D);const h=hit(V.clone(),D.clone(),2.5);if(!h.length){hud('Nada aquí');return}
+ head.getWorldPosition(V);if(handG.visible)D.copy(head.localToWorld(joints[8].position.clone())).sub(V).normalize();else cam.getWorldDirection(D);const h=hit(V.clone(),D.clone(),2.5);if(!h.length){hud('Nada aquí');return}
  const o=h[0].object,n=(o.name+' '+(o.parent?o.parent.name:''));
  if(/key|battery|spark|pepper|bom/i.test(n)){o.visible=false;o.layers.set(1);items++;if(AC)tone(660,.15,.12,'triangle');hud('Recogiste: '+o.name.split('_')[0]+' ('+items+')')}
  else if(/door|dörr|dorr/i.test(n)){o.visible=!o.visible;if(AC)tone(90,.4,.12,'sawtooth',-30);o.layers.set(o.visible?0:1);hud(o.visible?'Puerta cerrada':'Puerta abierta')}
@@ -63,17 +70,31 @@ async function calibrar(){msg.textContent='Presiona en el Joy-Con el botón para
  await new Promise(r=>setTimeout(r,600));msg.textContent='Ahora el botón para INTERACTUAR (o toca la pantalla)';k=await waitBtn();if(k!=null)map.use=k;await new Promise(r=>setTimeout(r,400))}
 
 // ---- manos (cámara trasera, pinza = interactuar)
-$('#hb').onclick=async()=>{try{const v=document.createElement('video');v.setAttribute('playsinline','');
- v.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:320,height:240}});await v.play();
- const H=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
- H.setOptions({maxNumHands:1,modelComplexity:0,minDetectionConfidence:.6,minTrackingConfidence:.5});let was=false;
- H.onResults(r=>{const l=r.multiHandLandmarks&&r.multiHandLandmarks[0];if(!l){was=false;return}const p=Math.hypot(l[4].x-l[8].x,l[4].y-l[8].y)<.05;if(p&&!was)interact();was=p});
- (async function loop(){await H.send({image:v});requestAnimationFrame(loop)})();$('#hb').textContent='Manos activas ✓'}catch(e){$('#hb').textContent='Manos no disponibles: '+e.message+(isSecureContext?'':' (falta https)')}};
+let HH=null,hv=null,testOn=false;
+async function initHands(){if(HH)return;
+ hv=document.createElement('video');hv.setAttribute('playsinline','');hv.muted=true;
+ hv.srcObject=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:640,height:480}});await hv.play();
+ HH=new Hands({locateFile:f=>'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/'+f});
+ HH.setOptions({maxNumHands:1,modelComplexity:0,minDetectionConfidence:.6,minTrackingConfidence:.5});let was=false;
+ HH.onResults(r=>{const l=r.multiHandLandmarks&&r.multiHandLandmarks[0];if(testOn)drawTest(l);
+  if(!l){was=false;handG.visible=false;return}const p=Math.hypot(l[4].x-l[8].x,l[4].y-l[8].y)<.05;showHand(l,p);if(p&&!was)interact();was=p});
+ (async function loop(){await HH.send({image:hv});requestAnimationFrame(loop)})()}
+function drawTest(l){const c=$('#tc'),W=c.width=innerWidth,H=c.height=innerHeight,g=c.getContext('2d');g.clearRect(0,0,W,H);
+ if(!l){$('#ts').textContent='No detecto tu mano';return}
+ const vw=hv.videoWidth||640,vh=hv.videoHeight||480,s=Math.min(W/vw,H/vh),ox=(W-vw*s)/2,oy=(H-vh*s)/2,P=l.map(p=>[ox+p.x*vw*s,oy+p.y*vh*s]);
+ g.lineWidth=6;g.strokeStyle='#ffcfa8';HC.forEach(([a,b])=>{g.beginPath();g.moveTo(P[a][0],P[a][1]);g.lineTo(P[b][0],P[b][1]);g.stroke()});
+ g.fillStyle='#fff';P.forEach(p=>{g.beginPath();g.arc(p[0],p[1],7,0,7);g.fill()});
+ const pin=Math.hypot(l[4].x-l[8].x,l[4].y-l[8].y)<.05;
+ if(pin){g.fillStyle='#7dff9a';[4,8].forEach(i=>{g.beginPath();g.arc(P[i][0],P[i][1],14,0,7);g.fill()})}
+ $('#ts').textContent=pin?'✓ Mano detectada · PINZA':'✓ Mano detectada'}
+$('#hb').onclick=async()=>{try{await initHands();$('#hb').textContent='Manos activas ✓'}catch(e){$('#hb').textContent='Manos no disponibles: '+e.message+(isSecureContext?'':' (falta https)')}};
+$('#tb').onclick=async()=>{try{msg.textContent='Abriendo cámara…';await initHands();const v=$('#tv');v.srcObject=hv.srcObject;await v.play();testOn=true;$('#tst').style.display='block';$('#ts').textContent='Pon el celular horizontal y muestra tu mano a la cámara trasera';msg.textContent='Casa lista'}catch(e){msg.textContent='Cámara no disponible: '+e.message+(isSecureContext?'':' (falta https)')}};
+$('#tx').onclick=()=>{testOn=false;$('#tst').style.display='none'};
 
 // ---- iniciar
 go.onclick=async()=>{audioInit();try{await document.documentElement.requestFullscreen();await screen.orientation.lock('landscape')}catch(e){}
  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}
- $('#hb').style.display=go.style.display=$('#rm').style.display=$('#st').style.display='none';spawn(+$('#rm').value);await calibrar();$('#ui').style.display='none';playing=true;hud('Mover: stick · A/B: botones · Toca para recentrar');
+ $('#hb').style.display=$('#tb').style.display=go.style.display=$('#rm').style.display=$('#st').style.display='none';spawn(+$('#rm').value);await calibrar();$('#ui').style.display='none';playing=true;hud('Mover: stick · A/B: botones · Toca para recentrar');
  addEventListener('click',()=>{if(dev&&dev.alpha!=null){const q=new THREE.Quaternion(),o=(screen.orientation?screen.orientation.angle:0)*Math.PI/180;setQ(q,dev.alpha,dev.beta,dev.gamma,o);eu.setFromQuaternion(q,'YXZ');rig.rotation.y=-eu.y}});
  last=performance.now();loop()};
 function setQ(q,a,b,g,o){const r=Math.PI/180;eu.set(b*r,a*r,-g*r,'YXZ');q.setFromEuler(eu);q.multiply(q1);q.multiply(q0.setFromAxisAngle(zee,-o))}
