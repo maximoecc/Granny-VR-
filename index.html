@@ -63,11 +63,13 @@ addEventListener('touchmove',e=>{const t=e.touches[0];if(lx!==undefined){drag.x-
 addEventListener('touchend',()=>lx=undefined);
 setInterval(()=>$('#st').textContent=(isSecureContext?'':'⚠ Sin https: Chrome bloquea giroscopio y cámara. ')+'Giroscopio: '+(dev&&dev.alpha!=null?'OK':'sin señal (puedes mirar arrastrando el dedo)'),500);
 // ---- interactuar
-const drawerState=new WeakMap();\nfunction interact(){if(!playing||dead)return;
+const drawerState=new WeakMap();
+function interact(){if(!playing||dead)return;
  head.getWorldPosition(V);if(handG.visible)D.copy(head.localToWorld(joints[8].position.clone())).sub(V).normalize();else cam.getWorldDirection(D);const h=hit(V.clone(),D.clone(),2.5);if(!h.length){hud('Nada aquí');return}
  const o=h[0].object,n=(o.name+' '+(o.parent?o.parent.name:''));
  if(/key|battery|spark|pepper|bom|item|pickup|collect/i.test(n)){o.visible=false;o.layers.set(1);items++;if(AC)tone(660,.15,.12,'triangle');hud('Recogiste: '+o.name.split('_')[0]+' ('+items+')')}
- else if(/drawer|caj[oó]n|tiroir/i.test(n)){const was=drawerState.has(o)?drawerState.get(o):false;drawerState.set(o,!was);o.position.z+=was?-.22:.22;if(AC)tone(120,.18,.1,'wood');hud(was?'Cajón cerrado':'Cajón abierto')}\n else if(/door|dörr|dorr/i.test(n)){o.visible=!o.visible;if(AC)tone(90,.4,.12,'sawtooth',-30);o.layers.set(o.visible?0:1);hud(o.visible?'Puerta cerrada':'Puerta abierta')}
+ else if(/drawer|caj[oó]n|tiroir/i.test(n)){const was=drawerState.has(o)?drawerState.get(o):false;drawerState.set(o,!was);o.position.z+=was?-.22:.22;if(AC)tone(120,.18,.1,'wood');hud(was?'Cajón cerrado':'Cajón abierto')}
+ else if(/door|dörr|dorr/i.test(n)){o.visible=!o.visible;if(AC)tone(90,.4,.12,'sawtooth',-30);o.layers.set(o.visible?0:1);hud(o.visible?'Puerta cerrada':'Puerta abierta')}
  else hud(o.name.split('_')[0]||'Objeto');}
 
 // ---- mandos
