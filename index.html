@@ -1,9 +1,8 @@
-<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Granny VR Cardboard · V(0.4)</title>
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Granny VR Cardboard · V(0.5)</title>
 <style>html,body{margin:0;height:100%;background:#000;color:#fff;font:16px sans-serif;overflow:hidden}canvas{display:block}#ui{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#000e;text-align:center;padding:16px;z-index:5}button{font-size:18px;padding:12px 20px;border:0;border-radius:8px}.h{position:fixed;top:10px;transform:translateX(-50%);font-size:14px;text-align:center;pointer-events:none;text-shadow:0 0 4px #000;width:40%;white-space:pre-line}</style></head><body>
-<div id="ui"><h2>Casa VR <small style="font-size:14px;color:#9ee7bd">V(0.4)</small></h2><div style="max-width:340px;font-size:13px;opacity:.85">Movimiento con joystick derecho · un único punto de inicio</div><div id="msg">Cargando casa…</div><div id="st" style="font-size:14px"></div><button id="go" disabled>Jugar</button><button id="hb">Activar manos (cámara)</button><button id="tb">Probar manos (test)</button><div style="max-width:340px;font-size:12px;opacity:.7">Informe de desarrollo · V(0.4): joystick derecho y un único punto de inicio predeterminado.</div></div>
+<div id="ui"><h2>Casa VR <small style="font-size:14px;color:#9ee7bd">V(0.5)</small></h2><div style="max-width:340px;font-size:13px;opacity:.85">Joy-Con derecho: joystick para moverte · botón asignado para interactuar · agacharse alternable</div><div id="msg">Cargando casa…</div><div id="st" style="font-size:14px"></div><button id="go" disabled>Jugar</button><button id="hb">Activar manos (cámara)</button><button id="tb">Probar manos (test)</button><div style="max-width:340px;font-size:12px;opacity:.7">Informe de desarrollo · V(0.5): joystick derecho, agacharse alternable e interacción solo con el mando.</div></div>
 <div id="tst" style="display:none;position:fixed;inset:0;z-index:9;background:#000"><video id="tv" playsinline muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain"></video><canvas id="tc" style="position:absolute;inset:0;width:100%;height:100%"></canvas><div id="ts" style="position:absolute;top:8px;left:0;right:0;text-align:center;font-size:18px;text-shadow:0 0 4px #000"></div><button id="tx" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%)">Salir del test</button></div>
-<div class="h" style="left:25%"></div><div class="h" style="left:75%"></div><button id="act" style="display:none;position:fixed;right:5%;bottom:12%;z-index:4;border-radius:50%;width:88px;height:88px;background:#d9d1b4;color:#17130e;font-weight:bold;border:3px solid #6b5b42;box-shadow:0 3px 12px #0009;touch-action:manipulation">TOMAR /<br>USAR</button>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<div class="h" style="left:25%"></div><div class="h" style="left:75%"></div><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"></script>
 <script>
@@ -60,16 +59,16 @@ function findFree(x,fy,z){for(let R=0;R<=5;R+=.4){const n=R?Math.ceil(R*10):1;fo
 function spawn(){const S=.4;
  // Único punto de inicio: la ubicación predeterminada que ya usaba esta recreación.
  const p=[10,-2.1,22],fy=p[1]*S,q=[p[0]*S,p[2]*S];
- rig.position.set(q[0],fy,q[1]);granny.position.set(-18.8*S,-8.8*S,27.5*S);bedOK=q[1]}
+ rig.position.set(q[0],fy,q[1]);granny.position.set(q[0]+3,fy,q[1]+3);granny.visible=true;bedOK=q[1]}
 addEventListener('touchmove',e=>{const t=e.touches[0];if(lx!==undefined){drag.x-=(t.clientX-lx)*.005;drag.y=Math.max(-1.4,Math.min(1.4,drag.y-(t.clientY-ly)*.005))}lx=t.clientX;ly=t.clientY});
 addEventListener('touchend',()=>lx=undefined);
 setInterval(()=>$('#st').textContent=(isSecureContext?'':'⚠ Sin https: Chrome bloquea giroscopio y cámara. ')+'Giroscopio: '+(dev&&dev.alpha!=null?'OK':'sin señal (puedes mirar arrastrando el dedo)'),500);
 // ---- interactuar
-const drawerState=new WeakMap();
+const drawerState=new WeakMap(),drawerAnimations=new Set(); let heldItem=null;
 function interact(){if(!playing||dead)return;
  head.getWorldPosition(V);
  if(handG.visible) D.copy(head.localToWorld(joints[8].position.clone())).sub(V).normalize(); else cam.getWorldDirection(D);
- const h=hit(V.clone(),D.clone(),3.2);if(!h.length){hud('Acércate y apunta al objeto');return}
+ const h=hit(V.clone(),D.clone(),3.2);if(!h.length){if(heldItem){heldItem.visible=true;heldItem.traverse?.(x=>{x.visible=true});heldItem.position.set(rig.position.x+D.x*.8,rig.position.y-.2,rig.position.z+D.z*.8);heldItem=null;model.updateMatrixWorld(true);meshes.forEach(m=>{if(m.userData.b)m.userData.b.setFromObject(m)});hud('Objeto soltado');return}hud('Acércate y apunta al objeto');return}
  const mesh=h[0].object;
  // Busca el objeto interactivo en sus ancestros, porque el modelo de Granny usa
  // nombres en grupos (por ejemplo BatteryPL1 y Loda2Parent), no siempre en la malla.
@@ -79,14 +78,18 @@ function interact(){if(!playing||dead)return;
  const drawerRe=/(lodaparent|loda2parent|byroloda|drawer|caj[oó]n|skrivbordsloda)/i;
  const doorRe=/(door|lucka|secretdoor|elevatordoor|metallockerdoor|bastudoor|burdoor)/i;
  if(itemRe.test(names)){
+   if(heldItem){heldItem.visible=true;heldItem.traverse?.(x=>{x.visible=true});heldItem.position.set(rig.position.x+D.x*.8,rig.position.y-.2,rig.position.z+D.z*.8);heldItem=null;model.updateMatrixWorld(true);meshes.forEach(m=>{if(m.userData.b)m.userData.b.setFromObject(m)});hud('Objeto anterior soltado');return}
    const target=chain.find(x=>/^(BatteryPL|SparkPlug|Pepper|BatteryBom|CarkeyPL|HouseKeyPL|playHouseKeyPL|HanglockKeyPL|HammerPL|MelonPickUpPL|Melon$|Shotgun1_PL|AvbitarePL|BirdSeedBoxPL|MetalCan|Vapennyckel)/i.test(x.name||''))||mesh;
-   target.visible=false;target.traverse?.(x=>{x.visible=false});items++;if(AC)tone(660,.15,.12,'triangle');hud('Objeto recogido · '+items);
+   heldItem=target;target.visible=false;target.traverse?.(x=>{x.visible=false});items++;if(AC)tone(660,.15,.12,'triangle');hud('Objeto recogido · suelta el objeto para recoger otro');
  }else if(drawerRe.test(names)){
    const target=chain.find(x=>/(lodaparent|loda2parent|drawer|caj[oó]n|skrivbordsloda)/i.test(x.name||''))||mesh;
    const was=drawerState.get(target)||false;drawerState.set(target,!was);
    target.traverse(x=>{x.matrixAutoUpdate=true});target.matrixAutoUpdate=true;
-   target.position.x+=was?-.28:.28;model.updateMatrixWorld(true);meshes.forEach(m=>{if(m.userData.b)m.userData.b.setFromObject(m)});
-   if(AC)tone(120,.18,.1,'wood');hud(was?'Cajón cerrado':'Cajón abierto');
+   if(!target.userData.drawerClosedPos)target.userData.drawerClosedPos=target.position.clone();
+   const from=target.position.clone(),base=target.userData.drawerClosedPos,to=base.clone();to.x+=was?0:.32;
+   const anim={target,from,to,start:performance.now(),duration:360};drawerAnimations.add(anim);
+   (function tick(){if(!drawerAnimations.has(anim))return;const t=Math.min(1,(performance.now()-anim.start)/anim.duration);target.position.lerpVectors(anim.from,anim.to,t);model.updateMatrixWorld(true);meshes.forEach(m=>{if(m.userData.b)m.userData.b.setFromObject(m)});if(t<1)requestAnimationFrame(tick);else drawerAnimations.delete(anim)})();
+   if(AC)tone(120,.18,.1,'wood');hud(was?'Cajón cerrándose':'Cajón abriéndose');
  }else if(doorRe.test(names)){
    const target=chain.find(x=>/(secretdoor|elevatordoor|metallockerdoor|bastudoor|burdoor|door|lucka)/i.test(x.name||''))||mesh;
    target.visible=!target.visible;if(AC)tone(90,.4,.12,'sawtooth',-30);hud(target.visible?'Puerta cerrada':'Puerta abierta');
@@ -120,12 +123,12 @@ function drawTest(l){const c=$('#tc'),W=c.width=innerWidth,H=c.height=innerHeigh
 $('#hb').onclick=async()=>{try{await initHands();$('#hb').textContent='Manos activas ✓'}catch(e){$('#hb').textContent='Manos no disponibles: '+e.message+(isSecureContext?'':' (falta https)')}};
 $('#tb').onclick=async()=>{try{msg.textContent='Abriendo cámara…';await initHands();const v=$('#tv');v.srcObject=hv.srcObject;await v.play();testOn=true;$('#tst').style.display='block';$('#ts').textContent='Pon el celular horizontal y muestra tu mano a la cámara trasera';msg.textContent='Casa lista'}catch(e){msg.textContent='Cámara no disponible: '+e.message+(isSecureContext?'':' (falta https)')}};
 $('#tx').onclick=()=>{testOn=false;$('#tst').style.display='none'};
-$('#act').addEventListener('pointerdown',e=>{e.preventDefault();interact()});
+
 
 // ---- iniciar
 go.onclick=async()=>{audioInit();try{await document.documentElement.requestFullscreen();await screen.orientation.lock('landscape')}catch(e){}
  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}
- $('#hb').style.display=$('#tb').style.display=go.style.display=$('#st').style.display='none';spawn();await calibrar();$('#ui').style.display='none';playing=true;$('#act').style.display='block';hud('Apunta al objeto y pulsa TOMAR / USAR');
+ $('#hb').style.display=$('#tb').style.display=go.style.display=$('#st').style.display='none';spawn();await calibrar();$('#ui').style.display='none';playing=true;hud('Joy-Con: botón de acción para interactuar · agacharse alternable');
  addEventListener('click',()=>{if(dev&&dev.alpha!=null){const q=new THREE.Quaternion(),o=(screen.orientation?screen.orientation.angle:0)*Math.PI/180;setQ(q,dev.alpha,dev.beta,dev.gamma,o);eu.setFromQuaternion(q,'YXZ');rig.rotation.y=-eu.y}});
  last=performance.now();loop()};
 function setQ(q,a,b,g,o){const r=Math.PI/180;eu.set(b*r,a*r,-g*r,'YXZ');q.setFromEuler(eu);q.multiply(q1);q.multiply(q0.setFromAxisAngle(zee,-o))}
@@ -154,9 +157,10 @@ let last=0;
 function loop(){requestAnimationFrame(loop);const now=performance.now(),raw=(now-last)/1e3,dt=Math.min(.05,raw);last=now;fpsT+=raw;fpsN++;if(fpsT>2){const f=fpsN/fpsT;fpsT=fpsN=0;const np=f<22?Math.max(.5,pr-.15):(f>50?Math.min(1.25,pr+.1):pr);if(np!==pr){pr=np;R.setPixelRatio(pr);R.setSize(innerWidth,innerHeight)}}if(now-(loop.t||0)>500){loop.t=now;const p=rig.position;dbg='';}
  if(dev&&dev.alpha!=null){const o=(screen.orientation?screen.orientation.angle:0)*Math.PI/180;setQ(head.quaternion,dev.alpha,dev.beta,dev.gamma,o)}else head.rotation.set(drag.y,drag.x,0)
  let moving=false,gd=99;if(!dead){let ax=0,ay=0,cr=false,use=false;
-  for(const p of pads()){if(p.axes&&p.axes.length>=2){let x=p.axes[0]||0,y=p.axes[1]||0;const dz=.16;ax=Math.abs(x)>dz?Math.sign(x)*(Math.abs(x)-dz)/(1-dz):0;ay=Math.abs(y)>dz?Math.sign(y)*(Math.abs(y)-dz)/(1-dz):0;}
-   if(p.buttons[map.crouch]&&p.buttons[map.crouch].pressed)cr=true;if(p.buttons[map.use]&&p.buttons[map.use].pressed)use=true}
-  if(use&&!prevUse)interact();prevUse=use;crouch=cr;
+  let crouchPressed=false;for(const p of pads()){if(p.axes&&p.axes.length>=2){let x=(p.axes.length>=4?p.axes[2]:p.axes[0])||0,y=(p.axes.length>=4?p.axes[3]:p.axes[1])||0;const dz=.16;ax=Math.abs(x)>dz?Math.sign(x)*(Math.abs(x)-dz)/(1-dz):0;ay=Math.abs(y)>dz?Math.sign(y)*(Math.abs(y)-dz)/(1-dz):0;}
+   if(p.buttons[map.crouch]&&p.buttons[map.crouch].pressed)crouchPressed=true;if(p.buttons[map.use]&&p.buttons[map.use].pressed)use=true}
+  if(crouchPressed&&!loop.prevCrouch)crouch=!crouch;loop.prevCrouch=crouchPressed;
+  if(use&&!prevUse)interact();prevUse=use;
   const th=crouch?1:1.6;eyeH+=(th-eyeH)*Math.min(1,dt*8);
   cam.getWorldDirection(D);D.y=0;D.normalize();const Rt=new THREE.Vector3(-D.z,0,D.x),sp=(crouch?.9:2)*dt,
    mv=D.clone().multiplyScalar(-ay*sp).add(Rt.multiplyScalar(ax*sp));
