@@ -1,6 +1,7 @@
-<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Casa VR V8</title>
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Casa VR V10</title>
 <style>html,body{margin:0;height:100%;background:#000;color:#fff;font:16px sans-serif;overflow:hidden}canvas{display:block}#ui{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#000e;text-align:center;padding:16px;z-index:5}button{font-size:18px;padding:12px 20px;border:0;border-radius:8px}.h{position:fixed;top:10px;transform:translateX(-50%);font-size:14px;text-align:center;pointer-events:none;text-shadow:0 0 4px #000;width:40%;white-space:pre-line}</style></head><body>
-<div id="ui"><h2>Casa VR</h2><div style="opacity:.8;font-size:16px">V8</div><div id="msg">Cargando casa…</div><div id="st" style="font-size:14px"></div><select id="rm" style="font-size:18px;padding:8px"><option value="1">Dormitorio 1 (cama 1)</option><option value="2">Dormitorio 2 (cama 2)</option><option value="3">Dormitorio 3 (cama 3)</option><option value="4">Planta baja</option></select><button id="go" disabled>Jugar</button><button id="hb">Activar manos (cámara)</button><button id="tb">Probar manos (test)</button></div>
+<div id="ui"><h2>Casa VR</h2><div style="opacity:.8;font-size:16px">V10</div><div id="msg">Cargando casa…</div><div id="st" style="font-size:14px"></div><select id="rm" style="font-size:18px;padding:8px"><option value="0">Inicio original (frente a escaleras)</option><option value="1">Dormitorio 1 (cama 1)</option><option value="2">Dormitorio 2 (cama 2)</option><option value="3">Dormitorio 3 (cama 3)</option><option value="4">Planta baja</option></select><button id="go" disabled>Jugar</button><button id="hb">Activar manos (cámara)</button><button id="tb">Probar manos (test)</button><button id="gb">Probar mando (test)</button></div>
+<div id="gt" style="display:none;position:fixed;inset:0;z-index:9;background:#000;padding:16px;overflow:auto"><pre id="gp" style="white-space:pre-wrap;font-size:16px"></pre><button id="gx">Cerrar</button></div>
 <div id="tst" style="display:none;position:fixed;inset:0;z-index:9;background:#000"><video id="tv" playsinline muted style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain"></video><canvas id="tc" style="position:absolute;inset:0;width:100%;height:100%"></canvas><div id="ts" style="position:absolute;top:8px;left:0;right:0;text-align:center;font-size:18px;text-shadow:0 0 4px #000"></div><button id="tx" style="position:absolute;bottom:12px;left:50%;transform:translateX(-50%)">Salir del test</button></div>
 <div class="h" style="left:25%"></div><div class="h" style="left:75%"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -25,7 +26,7 @@ const UP=new THREE.Vector3(0,1,0),pa=new THREE.Vector3(),pb=new THREE.Vector3();
 function showHand(l,pinch){hMat.color.setHex(pinch?0x7dff9a:0xffcfa8);l.forEach((p,i)=>joints[i].position.set((p.x-.5)*.6,-(p.y-.5)*.45,-.5-p.z*.5));
  HC.forEach((c,i)=>{pa.copy(joints[c[0]].position);pb.copy(joints[c[1]].position);const b=bones[i];b.position.copy(pa).add(pb).multiplyScalar(.5);const d=pb.sub(pa),len=d.length()||1e-4;b.scale.set(1,len,1);b.quaternion.setFromUnitVectors(UP,d.normalize())});handG.visible=true}
 
-let held=null,warm=3,pr=1,fpsT=0,fpsN=0,find,bedOK,grace=12,drag={x:0,y:0},lx,ly,meshes=[],model,eyeH=1.6,floorY=0,dev=null,playing=false,dead=false,items=0,map={crouch:0,use:1,fa:1,fs:-1,sa:0,ss:1},crT=false,prevCr=false,prevUse=false,crouch=false;
+let hiding=null,prevPos=null,stInfo='',held=null,warm=3,pr=1,fpsT=0,fpsN=0,find,bedOK,grace=12,drag={x:0,y:0},lx,ly,meshes=[],model,eyeH=1.6,floorY=0,dev=null,playing=false,dead=false,items=0,map={crouch:0,use:1,fa:1,fs:-1,sa:0,ss:1,cal:false,hat:false,hatF:0},crT=false,prevCr=false,prevUse=false,crouch=false;
 const RC=new THREE.Raycaster(),V=new THREE.Vector3(),D=new THREE.Vector3();
 const zee=new THREE.Vector3(0,0,1),eu=new THREE.Euler(),q0=new THREE.Quaternion(),q1=new THREE.Quaternion(-Math.sqrt(.5),0,0,Math.sqrt(.5));
 addEventListener('deviceorientation',e=>dev=e);
@@ -57,8 +58,16 @@ function free(x,fy,z){const o=new THREE.Vector3(x,fy+.4,z),o2=new THREE.Vector3(
  if(hit(o,new THREE.Vector3(0,1,0),2).length)return false;
  const g=hit(new THREE.Vector3(x,fy+1,z),new THREE.Vector3(0,-1,0),2);return g.length>0&&Math.abs(g[0].point.y-fy)<.25}
 function findFree(x,fy,z){for(let R=0;R<=5;R+=.4){const n=R?Math.ceil(R*10):1;for(let a=0;a<n;a++){const t=a/n*6.283,px=x+Math.cos(t)*R,pz=z+Math.sin(t)*R;if(free(px,fy,pz))return[px,pz,true]}}return[x,z,false]}
-function spawn(r){const S=.4,P={1:[6.07,-.84,13.03],2:[1.52,-.84,4.2],3:[-8.47,-.84,5.1],4:[-.4,-3.52,5.6]},p=P[r]||P[1],q=findFree(p[0],p[1],p[2]);
- rig.position.set(q[0],p[1],q[1]);granny.position.set(-18.8*S,-8.8*S,27.5*S);bedOK=q[2]}
+function stairs(){const fy=-.84,cell=new Map(),K=(x,z)=>Math.round(x/.35)+','+Math.round(z/.35);
+ for(let x=-9;x<=7;x+=.35)for(let z=.5;z<=14.5;z+=.35){const h=hit(new THREE.Vector3(x,fy+.8,z),new THREE.Vector3(0,-1,0),6);if(!h.length||h[0].point.y<fy-1.2)cell.set(K(x,z),[x,z])}
+ const seen=new Set();let best=[];for(const k of cell.keys()){if(seen.has(k))continue;const q=[k],comp=[];seen.add(k);
+  while(q.length){const c=q.pop();comp.push(cell.get(c));const ab=c.split(',').map(Number);for(const d of[[1,0],[-1,0],[0,1],[0,-1]]){const nk=(ab[0]+d[0])+','+(ab[1]+d[1]);if(cell.has(nk)&&!seen.has(nk)){seen.add(nk);q.push(nk)}}}
+  if(comp.length>best.length)best=comp}
+ if(best.length<5)return null;let sx=0,sz=0;best.forEach(p=>{sx+=p[0];sz+=p[1]});return[sx/best.length,sz/best.length,best.length]}
+const BEDS=[[6.07,13.03],[1.52,4.2],[-8.47,5.1]];
+function spawn(r){const S=.4,P={1:[6.07,-.84,13.03],2:[1.52,-.84,4.2],3:[-8.47,-.84,5.1],4:[-.4,-3.52,5.6]};
+ if(r===0){const s=stairs();if(s){stInfo=' · escalera '+s[0].toFixed(1)+','+s[1].toFixed(1)+' ('+s[2]+')';let bi=0,bd=1e9;BEDS.forEach((b,i)=>{const d=Math.hypot(b[0]-s[0],b[1]-s[1]);if(d<bd){bd=d;bi=i}});r=bi+1}else{stInfo=' · escalera NO detectada';r=2}}
+ const p=P[r]||P[1],q=findFree(p[0],p[1],p[2]);rig.position.set(q[0],p[1],q[1]);granny.position.set(-18.8*S,-8.8*S,27.5*S);bedOK=q[2]}
 addEventListener('touchmove',e=>{const t=e.touches[0];if(lx!==undefined){drag.x-=(t.clientX-lx)*.005;drag.y=Math.max(-1.4,Math.min(1.4,drag.y-(t.clientY-ly)*.005))}lx=t.clientX;ly=t.clientY});
 addEventListener('touchend',()=>lx=undefined);
 setInterval(()=>$('#st').textContent=(isSecureContext?'':'⚠ Sin https: Chrome bloquea giroscopio y cámara. ')+'Giroscopio: '+(dev&&dev.alpha!=null?'OK':'sin señal (puedes mirar arrastrando el dedo)'),500);
@@ -85,27 +94,44 @@ function toggleDrawer(dr){const u=dr.userData;if(u.busy)return;
   ms.forEach(x=>x.layers.set(0));u.dir=best;u.len=best.x?sz.x:sz.z;u.open=true}
  const sg=u.open?-1:1,wd=u.dir.clone().multiplyScalar(sg*u.len*.5),p0=new THREE.Vector3();dr.getWorldPosition(p0);
  const l0=dr.parent.worldToLocal(p0.clone()),l1=dr.parent.worldToLocal(p0.clone().add(wd));
- u.busy=true;dr.matrixAutoUpdate=true;anim.push({n:dr,a:dr.position.clone(),b:dr.position.clone().add(l1.sub(l0)),t:0});
+ u.busy=true;dr.matrixAutoUpdate=true;{const A=dr.position.clone(),B=A.clone().add(l1.sub(l0));anim.push({n:dr,t:0,f:e=>dr.position.lerpVectors(A,B,e)})}
  hud(u.open?'Cajón cerrado':'Cajón abierto');if(AC)tone(u.open?80:110,.35,.12,'sawtooth',-20);u.open=!u.open}
-function interact(){if(!playing||dead)return;if(held){drop();return}
+function toggleDoor(d){const u=d.userData;if(u.busy)return;d.updateMatrixWorld(true);const pw=new THREE.Vector3();d.getWorldPosition(pw);
+ if(u.sign===undefined){const bb=new THREE.Box3().setFromObject(d),rv=bb.getCenter(new THREE.Vector3()).sub(pw);rv.y=0;let best=1,bd=-1;
+  for(const s of[1,-1]){const q=rv.clone().applyAxisAngle(new THREE.Vector3(0,1,0),s*1.6),dd=Math.hypot(pw.x+q.x-rig.position.x,pw.z+q.z-rig.position.z);if(dd>bd){bd=dd;best=s}}u.sign=best;u.ang=0}
+ const from=u.ang,to=u.ang?0:u.sign*1.6,w0=d.matrixWorld.clone(),pinv=d.parent.matrixWorld.clone().invert();u.busy=true;d.matrixAutoUpdate=true;u.ang=to;
+ anim.push({n:d,t:0,f:e=>{const a=(to-from)*e,M=new THREE.Matrix4().makeTranslation(pw.x,pw.y,pw.z).multiply(new THREE.Matrix4().makeRotationY(a)).multiply(new THREE.Matrix4().makeTranslation(-pw.x,-pw.y,-pw.z));
+  new THREE.Matrix4().copy(pinv).multiply(M).multiply(w0).decompose(d.position,d.quaternion,d.scale)}});
+ hud(to?'Puerta abierta':'Puerta cerrada');if(AC)tone(to?90:70,.4,.12,'sawtooth',-30)}
+const SPOTS=[{m:[6.07,13.03],c:[5.77,-.5,11.81],fy:-.84},{m:[1.52,4.2],c:[1.4,-.5,4.5],fy:-.84},{m:[-8.47,5.1],c:[-8.17,-.5,5.23],fy:-.84},{m:[-4.12,7.05],c:[-4.12,2.69,7.05],fy:2.15,o:[-4.05,2.15,7.55]},{m:[-7.16,-1.6],c:[-7.16,-3.54,-1.6],fy:-3.9,o:[-7.1,-3.9,-1.05]}];
+function nearSpot(){for(const s of SPOTS)if(Math.hypot(rig.position.x-s.m[0],rig.position.z-s.m[1])<2&&Math.abs(rig.position.y-s.fy)<1.5)return s;return null}
+function enterHide(s){hiding=s;prevPos=rig.position.clone();rig.position.set(s.c[0],s.c[1],s.c[2]);if(AC)tone(70,.4,.1,'sine',-10);hud('Escondido · mueve el stick o toca B para salir')}
+function exitHide(){const s=hiding;hiding=null;if(s.o)rig.position.set(s.o[0],s.o[1],s.o[2]);else rig.position.copy(prevPos);if(AC)tone(90,.3,.1,'sine',10);hud('')}
+function interact(){if(!playing||dead)return;if(hiding){exitHide();return}if(held){drop();return}
  head.getWorldPosition(V);if(handG.visible)D.copy(head.localToWorld(joints[8].position.clone())).sub(V).normalize();else cam.getWorldDirection(D);
- const h=hit(V.clone(),D.clone(),2.5);if(!h.length){hud('Nada aquí');return}
- const o=h[0].object;let it=null,dr=null;for(let a=o;a;a=a.parent){if(!it&&(/PL\d$/i.test(a.name)||a.name==='MetalCan'))it=a;if(!dr&&/^Loda2?Parent/i.test(a.name))dr=a}
+ const hs=nearSpot(),h=hit(V.clone(),D.clone(),2.5);if(!h.length){if(hs)enterHide(hs);else hud('Nada aquí');return}
+ const o=h[0].object;let it=null,dr=null,dd=null;for(let a=o;a;a=a.parent){if(!it&&(/PL\d$/i.test(a.name)||a.name==='MetalCan'))it=a;if(!dr&&/^Loda2?Parent/i.test(a.name))dr=a;if(!dd&&a!==o&&/door|dörr|dorr/i.test(a.name)&&!/holder|doors$|lock|knapp|collider/i.test(a.name))dd=a}if(!dd&&/door|dörr|dorr/i.test(o.name)&&!/lock|knapp|collider/i.test(o.name))dd=o;
  const n=o.name+' '+(o.parent?o.parent.name:'');
  if(it)grab(it);else if(dr)toggleDrawer(dr);
- else if(/door|dörr|dorr/i.test(n)){o.visible=!o.visible;if(AC)tone(90,.4,.12,'sawtooth',-30);o.layers.set(o.visible?0:1);hud(o.visible?'Puerta cerrada':'Puerta abierta')}
- else hud(o.name.split('_')[0]||'Objeto')}
+ else if(dd)toggleDoor(dd)
+ else if(hs)enterHide(hs);else hud(o.name.split('_')[0]||'Objeto')}
 
 // ---- mandos
 const pads=()=>[...(navigator.getGamepads?navigator.getGamepads():[])].filter(Boolean);
 const waitBtn=()=>new Promise(r=>{const t=setInterval(()=>{for(const p of pads())for(let i=0;i<p.buttons.length;i++)if(p.buttons[i].pressed){clearInterval(t);r(i)}},50);document.body.addEventListener('click',()=>{clearInterval(t);r(null)},{once:true})});
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const waitAxis=ex=>new Promise(r=>{const t=setInterval(()=>{for(const p of pads())for(let i=0;i<p.axes.length;i++)if(i!==ex&&Math.abs(p.axes[i])>.6){clearInterval(t);r({i,s:Math.sign(p.axes[i])})}},50);document.body.addEventListener('click',()=>{clearInterval(t);r(null)},{once:true})});
+const hatOf=p=>{if(p.axes.length<10)return null;const v=p.axes[9];if(v>1.1||v<-1.1)return null;const i=Math.round((v+1)/.2857);return i>=0&&i<8?i:null};
+const waitAxis=ex=>new Promise(r=>{const t=setInterval(()=>{for(const p of pads()){const h=hatOf(p);if(h!==null){clearInterval(t);r({hat:1,h});return}
+ for(let i=0;i<p.axes.length;i++){if(i===9&&p.axes.length>=10)continue;const v=p.axes[i];if(i!==ex&&Math.abs(v)>.6&&Math.abs(v)<1.05){clearInterval(t);r({i,s:Math.sign(v)});return}}}},50);document.body.addEventListener('click',()=>{clearInterval(t);r(null)},{once:true})});
 async function calibrar(){
  msg.textContent='Presiona en el Joy-Con el botón para AGACHARTE (o toca la pantalla para omitir)';let k=await waitBtn();if(k!=null)map.crouch=k;await sleep(600);
  msg.textContent='Ahora el botón para INTERACTUAR (o toca la pantalla)';k=await waitBtn();if(k!=null)map.use=k;await sleep(600);
- msg.textContent='Empuja el stick hacia ADELANTE (o toca la pantalla)';let a=await waitAxis(-1);if(a){map.fa=a.i;map.fs=a.s}await sleep(900);
- msg.textContent='Ahora empuja el stick hacia la DERECHA (o toca la pantalla)';a=await waitAxis(map.fa);if(a){map.sa=a.i;map.ss=a.s}await sleep(600)}
+ msg.textContent='Empuja el stick hacia ADELANTE (o toca la pantalla)';let a=await waitAxis(-1);
+ if(a&&a.hat){map.hat=true;map.hatF=a.h;map.cal=true;await sleep(600);return}
+ if(a){map.fa=a.i;map.fs=a.s;map.cal=true}await sleep(900);
+ msg.textContent='Ahora empuja el stick hacia la DERECHA (o toca la pantalla)';a=await waitAxis(map.fa);if(a&&a.i!==undefined){map.sa=a.i;map.ss=a.s}await sleep(600)}
+setInterval(()=>{if($('#gt').style.display!=='block')return;$('#gp').textContent=pads().map(p=>p.id+' ['+p.mapping+']\nejes: '+[...p.axes].map((v,i)=>i+':'+v.toFixed(2)).join('  ')+'\nbotones: '+[...p.buttons].map((b,i)=>b.pressed?i:'').filter(x=>x!=='').join(',')).join('\n\n')||'Sin mando. Presiona un botón del Joy-Con.'},100);
+$('#gb').onclick=()=>{$('#gt').style.display='block'};$('#gx').onclick=()=>{$('#gt').style.display='none'};
 
 // ---- manos (cámara trasera, pinza = interactuar)
 let HH=null,hv=null,testOn=false;
@@ -132,7 +158,7 @@ $('#tx').onclick=()=>{testOn=false;$('#tst').style.display='none'};
 // ---- iniciar
 go.onclick=async()=>{audioInit();try{await document.documentElement.requestFullscreen();await screen.orientation.lock('landscape')}catch(e){}
  try{navigator.wakeLock&&navigator.wakeLock.request('screen')}catch(e){}
- $('#hb').style.display=$('#tb').style.display=go.style.display=$('#rm').style.display=$('#st').style.display='none';spawn(+$('#rm').value);await calibrar();$('#ui').style.display='none';playing=true;hud('');
+ $('#hb').style.display=$('#tb').style.display=$('#gb').style.display=go.style.display=$('#rm').style.display=$('#st').style.display='none';spawn(+$('#rm').value);await calibrar();$('#ui').style.display='none';playing=true;hud('');
  addEventListener('click',()=>{if(dev&&dev.alpha!=null){const q=new THREE.Quaternion(),o=(screen.orientation?screen.orientation.angle:0)*Math.PI/180;setQ(q,dev.alpha,dev.beta,dev.gamma,o);eu.setFromQuaternion(q,'YXZ');rig.rotation.y=-eu.y}});
  last=performance.now();loop()};
 function setQ(q,a,b,g,o){const r=Math.PI/180;eu.set(b*r,a*r,-g*r,'YXZ');q.setFromEuler(eu);q.multiply(q1);q.multiply(q0.setFromAxisAngle(zee,-o))}
@@ -158,25 +184,29 @@ function sfx(dt,moving,d){if(!AC)return;
  if(n>0){tBeat-=dt;if(tBeat<=0){tone(58,.18,.3*n+.1,'sine',-20);setTimeout(()=>tone(52,.18,.25*n+.08,'sine',-20),170);tBeat=.35+(1-n)*.9}}}
 
 let last=0;
-function loop(){requestAnimationFrame(loop);const now=performance.now(),raw=(now-last)/1e3,dt=Math.min(.05,raw);last=now;fpsT+=raw;fpsN++;if(fpsT>2){const f=fpsN/fpsT;fpsT=fpsN=0;if(warm>0)warm--;else{const np=f<22?Math.max(.6,pr-.1):(f>45?Math.min(1.25,pr+.1):pr);if(np!==pr){pr=np;R.setPixelRatio(pr);R.setSize(innerWidth,innerHeight)}}}if(now-(loop.t||0)>500){loop.t=now;const p=rig.position;dbg='pos '+p.x.toFixed(1)+','+p.y.toFixed(1)+','+p.z.toFixed(1)+' · esc '+model.scale.x.toExponential(1)+' · mallas '+meshes.length+' · inicio '+(bedOK?'libre':'AJUSTADO')+' · res '+pr.toFixed(2)+(grace>0?' · espera '+Math.ceil(grace):'');draw()}
+function loop(){requestAnimationFrame(loop);const now=performance.now(),raw=(now-last)/1e3,dt=Math.min(.05,raw);last=now;fpsT+=raw;fpsN++;if(fpsT>2){const f=fpsN/fpsT;fpsT=fpsN=0;if(warm>0)warm--;else{const np=f<22?Math.max(.6,pr-.1):(f>45?Math.min(1.25,pr+.1):pr);if(np!==pr){pr=np;R.setPixelRatio(pr);R.setSize(innerWidth,innerHeight)}}}if(now-(loop.t||0)>500){loop.t=now;const p=rig.position;dbg='pos '+p.x.toFixed(1)+','+p.y.toFixed(1)+','+p.z.toFixed(1)+' · esc '+model.scale.x.toExponential(1)+' · mallas '+meshes.length+' · inicio '+(bedOK?'libre':'AJUSTADO')+' · res '+pr.toFixed(2)+stInfo+(grace>0?' · espera '+Math.ceil(grace):'');draw()}
  if(dev&&dev.alpha!=null){const o=(screen.orientation?screen.orientation.angle:0)*Math.PI/180;setQ(head.quaternion,dev.alpha,dev.beta,dev.gamma,o)}else head.rotation.set(drag.y,drag.x,0)
  let moving=false,gd=99;if(!dead){let ax=0,ay=0,cr=false,use=false;
-  for(const p of pads()){{const f=(p.axes[map.fa]||0)*map.fs,s=(p.axes[map.sa]||0)*map.ss;if(Math.abs(f)>.2||Math.abs(s)>.2){ay=-f;ax=s}}
+  for(const p of pads()){{let f=0,s=0;const h=hatOf(p),A=p.axes,u=i=>Math.abs(A[i]||0)<1.05?(A[i]||0):0;
+   if(map.hat){if(h!==null){const th=(h-map.hatF)*Math.PI/4;f=Math.cos(th);s=Math.sin(th)}}
+   else if(map.cal){f=(A[map.fa]||0)*map.fs;s=(A[map.sa]||0)*map.ss}
+   else{const pr=Math.hypot(u(2),u(3))>Math.hypot(u(0),u(1))?[2,3]:[0,1];f=-u(pr[1]);s=u(pr[0])}
+   if(Math.abs(f)>.2||Math.abs(s)>.2){ay=-f;ax=s}}
    if(p.buttons[map.crouch]&&p.buttons[map.crouch].pressed)cr=true;if(p.buttons[map.use]&&p.buttons[map.use].pressed)use=true}
   if(use&&!prevUse)interact();prevUse=use;if(cr&&!prevCr)crT=!crT;prevCr=cr;crouch=crT;
-  const th=crouch?1:1.6;eyeH+=(th-eyeH)*Math.min(1,dt*8);
+  const th=hiding?.05:(crouch?1:1.6);eyeH+=(th-eyeH)*Math.min(1,dt*8);
   cam.getWorldDirection(D);D.y=0;D.normalize();const Rt=new THREE.Vector3(-D.z,0,D.x),sp=(crouch?.9:2)*dt,
    mv=D.clone().multiplyScalar(-ay*sp).add(Rt.multiplyScalar(ax*sp));
-  if(mv.lengthSq()>1e-6){const d=mv.clone().normalize();head.getWorldPosition(V);V.y=rig.position.y+.5;
+  if(hiding){if(Math.hypot(ax,ay)>.5)exitHide();mv.set(0,0,0)}if(mv.lengthSq()>1e-6){const d=mv.clone().normalize();head.getWorldPosition(V);V.y=rig.position.y+.5;
    if(!hit(V.clone(),d,.45).length){rig.position.add(mv);moving=true}}
-  const gyy=ground(rig.position.x,rig.position.y,rig.position.z);if(gyy!==null)rig.position.y+=(gyy-rig.position.y)*Math.min(1,dt*10);
+  const gyy=ground(rig.position.x,rig.position.y,rig.position.z);if(gyy!==null&&!hiding)rig.position.y+=(gyy-rig.position.y)*Math.min(1,dt*10);
   head.position.y=eyeH;
   if(grace>0)grace-=dt;if(granny){const dx=rig.position.x-granny.position.x,dz=rig.position.z-granny.position.z,d=Math.hypot(dx,dz);
-   gd=grace>0?99:d;if(d<10){target.set(rig.position.x,0,rig.position.z)}else if(Math.hypot(target.x-granny.position.x,target.z-granny.position.z)<1){target.set(granny.position.x+(Math.random()-.5)*12,0,granny.position.z+(Math.random()-.5)*12)}
-   const tx=target.x-granny.position.x,tz=target.z-granny.position.z,tl=Math.hypot(tx,tz)||1,v=(grace>0?0:(d<10?1.5:.8))*dt;
+   gd=grace>0?99:d;if(d<10&&!hiding){target.set(rig.position.x,0,rig.position.z)}else if(Math.hypot(target.x-granny.position.x,target.z-granny.position.z)<1){target.set(granny.position.x+(Math.random()-.5)*12,0,granny.position.z+(Math.random()-.5)*12)}
+   const tx=target.x-granny.position.x,tz=target.z-granny.position.z,tl=Math.hypot(tx,tz)||1,v=(grace>0?0:(d<10&&!hiding?1.5:.8))*dt;
    granny.position.x+=tx/tl*v;granny.position.z+=tz/tl*v;const gg=ground(granny.position.x,granny.position.y,granny.position.z);if(gg!==null)granny.position.y=gg;
-   if(d<.8&&grace<=0){dead=true;if(AC){chaseG.gain.value=0;tone(45,1.6,.7,'sawtooth',-20)}hud('¡Te atrapó! Toca para reintentar');addEventListener('click',()=>location.reload())}}}
- for(let i=anim.length-1;i>=0;i--){const a=anim[i];a.t=Math.min(1,a.t+dt/.45);a.n.position.lerpVectors(a.a,a.b,a.t*a.t*(3-2*a.t));if(a.t>=1){anim.splice(i,1);a.n.userData.busy=false;rebox(a.n)}}
+   if(d<.8&&grace<=0&&!hiding){dead=true;if(AC){chaseG.gain.value=0;tone(45,1.6,.7,'sawtooth',-20)}hud('¡Te atrapó! Toca para reintentar');addEventListener('click',()=>location.reload())}}}
+ for(let i=anim.length-1;i>=0;i--){const a=anim[i];a.t=Math.min(1,a.t+dt/.45);a.f(a.t*a.t*(3-2*a.t));if(a.t>=1){anim.splice(i,1);a.n.userData.busy=false;rebox(a.n)}}
  if(held){held.position.copy(handG.visible?joints[9].position:HP);held.rotation.set(0,0,0)}
  if(!dead)sfx(dt,moving,gd);const w=innerWidth,h=innerHeight;R.setScissorTest(true);
  for(let e=0;e<2;e++){R.setViewport(e*w/2,0,w/2,h);R.setScissor(e*w/2,0,w/2,h);cam.aspect=(w/2)/h;cam.updateProjectionMatrix();cam.position.x=(e?1:-1)*.032;R.render(scene,cam)}}
