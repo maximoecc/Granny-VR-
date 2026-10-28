@@ -100,33 +100,39 @@ const TAU = Math.PI * 2;
 const NEON = '#b36bff';
 const KEYS = ['Left', 'Right'];
 
-const canvas = $('view');
-const ctx = canvas.getContext('2d', { alpha: false });
-const video = $('cam');
-const logoImg = new Image();
-logoImg.src = $('logoImg').src;
-
 /* ---------- Ajustes ---------- */
 const CONFIG = {
   RIGHT_NEEDS_POSE: true,   // true: la derecha también necesita la pose en L. false: el logo se ve siempre que haya mano derecha
   PINCH_ON: 0.25,           // distancia pulgar-índice / tamaño de palma para detectar pellizco
   PINCH_OFF: 0.35,          // para soltarlo (histéresis)
-  SMOOTH: 0.55,             // suavizado de puntos (1 = sin suavizado)
+  EURO: { minCutoff: 2.0, beta: 14, dCutoff: 3.0 }, // filtro One Euro: más beta = menos retraso al mover rápido; más minCutoff = menos suavizado en reposo
+  LEAD_MS: 15,              // adelanto de la mano dibujada para compensar el retraso del filtro y de la detección (0 para desactivarlo; súbelo si la mano va detrás de la imagen, bájalo si se adelanta)
   HAND_GRACE_MS: 250,       // cuánto aguanta una mano sin detectarse antes de desaparecer
   POSE_GRACE_MS: 600,       // cuánto se mantiene el icono tras perder la pose (permite pellizcar sin que se apague)
+  MAX_DPR: 1.5,             // resolución máxima del lienzo (más bajo = más rápido)
+  LOW_LATENCY_CANVAS: true, // lienzo "desynchronized": menos retraso de pantalla
 };
 const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 const CDN_VERSIONS = ['0.10.14', '0.10.3'];
 
+let savedSwap = null;
+try { savedSwap = localStorage.getItem('xrq_swap'); } catch (e) {}
 const state = {
   vr: false,
-  swap: true,        // la cámara trasera no es espejo: MediaPipe devuelve Izq/Der invertidos
+  swap: savedSwap === '1',   // por defecto las etiquetas Izq/Der de MediaPipe se usan tal cual
   depth: 10,
   zoom: 0.85,
   landmarker: null,
   note: '',
 };
 const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const canvas = $('view');
+const ctx = canvas.getContext('2d', { alpha: false, desynchronized: CONFIG.LOW_LATENCY_CANVAS });
+const video = $('cam');
+const elRotate = $('rotate'), elHud = $('hud');
+const logoImg = new Image();
+logoImg.src = $('logoImg').src;
 
 /* ---------- Gestos (funciones puras) ---------- */
 // <gesture>
@@ -145,16 +151,46 @@ function readHand(w) {
 // </gesture>
 
 /* ---------- Estado de las manos ---------- */
-const mkHand = () => ({ lm: null, lastSeen: -1e9, lastPose: -1e9, pinch: false, pinchT: -1e9, ui: 0, press: 0, info: null });
+const mkHand = () => ({
+  has: false,
+  xh: new Float32Array(42),    // posición filtrada (x,y por punto, 0..1)
+  dxh: new Float32Array(42),   // velocidad filtrada (unidades/seg)
+  px: Array.from({ length: 21 }, () => ({ x: 0, y: 0 })), // puntos en pantalla (con adelanto aplicado)
+  lastSeen: -1e9, lastPose: -1e9,
+  pinch: false, pinchT: -1e9, ui: 0, press: 0, info: null,
+});
 const hands = { Left: mkHand(), Right: mkHand() };
+
+// One Euro: suaviza mucho en reposo y casi nada cuando te mueves rápido
+const euroAlpha = (cut, dt) => 1 / (1 + 1 / (TAU * cut * dt));
+function filterHand(st, lm, now) {
+  if (!st.has || now - st.lastSeen > 300) {
+    for (let k = 0; k < 21; k++) { st.xh[2 * k] = lm[k].x; st.xh[2 * k + 1] = lm[k].y; }
+    st.dxh.fill(0);
+    st.has = true;
+    st.pinch = false;
+    return;
+  }
+  const O = CONFIG.EURO;
+  const dt = Math.max(0.005, (now - st.lastSeen) / 1000);
+  const ad = euroAlpha(O.dCutoff, dt);
+  for (let i = 0; i < 42; i++) {
+    const p = lm[i >> 1];
+    const v = (i & 1) ? p.y : p.x;
+    st.dxh[i] += ad * ((v - st.xh[i]) / dt - st.dxh[i]);
+    st.xh[i] += euroAlpha(O.minCutoff + O.beta * Math.abs(st.dxh[i]), dt) * (v - st.xh[i]);
+  }
+}
 
 function updateHands(res, now) {
   const hd = res.handedness || res.handednesses || [];
-  const list = (res.landmarks || []).map((lm, i) => {
+  const lms = res.landmarks || [];
+  const list = [];
+  for (let i = 0; i < lms.length; i++) {
     let label = (hd[i] && hd[i][0] && hd[i][0].categoryName) || 'Right';
     if (state.swap) label = label === 'Left' ? 'Right' : 'Left';
-    return { lm, world: (res.worldLandmarks && res.worldLandmarks[i]) || lm, label };
-  });
+    list.push({ lm: lms[i], world: (res.worldLandmarks && res.worldLandmarks[i]) || lms[i], label });
+  }
   // Si el modelo etiqueta las dos manos igual, decide por posición (en primera persona la izquierda queda a la izquierda)
   if (list.length === 2 && list[0].label === list[1].label) {
     const [a, b] = list[0].lm[0].x < list[1].lm[0].x ? [list[0], list[1]] : [list[1], list[0]];
@@ -162,18 +198,7 @@ function updateHands(res, now) {
   }
   for (const h of list) {
     const st = hands[h.label];
-    const fresh = !st.lm || now - st.lastSeen > 300;
-    if (fresh) {
-      st.lm = h.lm.map(p => ({ x: p.x, y: p.y, z: p.z }));
-      st.pinch = false;
-    } else {
-      for (let k = 0; k < 21; k++) {
-        const s = st.lm[k], n = h.lm[k];
-        s.x += (n.x - s.x) * CONFIG.SMOOTH;
-        s.y += (n.y - s.y) * CONFIG.SMOOTH;
-        s.z += (n.z - s.z) * CONFIG.SMOOTH;
-      }
-    }
+    filterHand(st, h.lm, now);
     st.lastSeen = now;
     const info = readHand(h.world);
     st.info = info;
@@ -186,21 +211,24 @@ function updateHands(res, now) {
 /* ---------- Dibujo ---------- */
 let W = 0, H = 0, dpr = 1;
 function resize() {
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  dpr = Math.min(window.devicePixelRatio || 1, CONFIG.MAX_DPR);
   W = innerWidth; H = innerHeight;
   canvas.width = Math.round(W * dpr);
   canvas.height = Math.round(H * dpr);
+  ctx.imageSmoothingQuality = 'low';
 }
 addEventListener('resize', resize);
 resize();
 
 const fillC = document.createElement('canvas'), edgeC = document.createElement('canvas');
 const fc = fillC.getContext('2d'), ec = edgeC.getContext('2d');
+let dirty = null; // zona de las capas de manos que se dibujó el fotograma anterior
 function sizeLayers(w, h) {
   const pw = Math.round(w * dpr), ph = Math.round(h * dpr);
   if (fillC.width !== pw || fillC.height !== ph) {
     fillC.width = edgeC.width = pw;
     fillC.height = edgeC.height = ph;
+    dirty = null;
   }
 }
 
@@ -209,7 +237,19 @@ function makeMap(vw, vh, w, h, zoom) {
   const dw = vw * s, dh = vh * s;
   return { dw, dh, ox: (w - dw) / 2, oy: (h - dh) / 2 };
 }
-const toPx = (m, p) => ({ x: m.ox + p.x * m.dw, y: m.oy + p.y * m.dh });
+
+// Puntos en pantalla: posición filtrada + velocidad * adelanto fijo.
+// El video solo cambia al ritmo de la cámara, así que la mano no se extrapola entre fotogramas: se queda pegada a la imagen.
+function updatePx(st, map) {
+  const lead = CONFIG.LEAD_MS / 1000;
+  for (let k = 0; k < 21; k++) {
+    const dx = Math.max(-0.03, Math.min(0.03, st.dxh[2 * k] * lead));
+    const dy = Math.max(-0.03, Math.min(0.03, st.dxh[2 * k + 1] * lead));
+    const p = st.px[k];
+    p.x = map.ox + (st.xh[2 * k] + dx) * map.dw;
+    p.y = map.oy + (st.xh[2 * k + 1] + dy) * map.dh;
+  }
+}
 
 function rr(c, x, y, w, h, r) {
   c.beginPath();
@@ -238,16 +278,22 @@ function drawShape(c, p, w) {
   c.stroke();
 }
 
-// Manos fantasma: relleno gris semitransparente + contorno más claro
-function buildHandLayers(map, now, w, h) {
+// Manos fantasma: relleno gris semitransparente + contorno más claro.
+// Solo se limpia y se vuelve a dibujar la zona donde están las manos; devuelve esa zona.
+function buildHandLayers(now, w, h) {
   sizeLayers(w, h);
-  for (const c of [fc, ec]) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, c.canvas.width, c.canvas.height); c.setTransform(dpr, 0, 0, dpr, 0, 0); }
+  for (const c of [fc, ec]) {
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    if (dirty) c.clearRect(dirty.x * dpr, dirty.y * dpr, dirty.w * dpr, dirty.h * dpr);
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   for (const key of KEYS) {
     const st = hands[key];
     const age = now - st.lastSeen;
-    if (!st.lm || age > CONFIG.HAND_GRACE_MS) continue;
+    if (!st.has || age > CONFIG.HAND_GRACE_MS) continue;
     const a = Math.max(0, Math.min(1, 1 - (age - 100) / (CONFIG.HAND_GRACE_MS - 100)));
-    const p = st.lm.map(q => toPx(map, q));
+    const p = st.px;
     const palmPx = Math.hypot(p[0].x - p[9].x, p[0].y - p[9].y);
     const lw = palmPx * 0.2, ow = Math.max(2, palmPx * 0.035);
     fc.globalAlpha = a; fc.fillStyle = fc.strokeStyle = '#d2d2d8';
@@ -257,30 +303,43 @@ function buildHandLayers(map, now, w, h) {
     ec.globalCompositeOperation = 'destination-out'; ec.globalAlpha = 1;
     drawShape(ec, p, lw);
     ec.globalCompositeOperation = 'source-over';
+    const pad = lw / 2 + ow + 4;
+    for (let k = 0; k < 21; k++) {
+      if (p[k].x - pad < x0) x0 = p[k].x - pad;
+      if (p[k].y - pad < y0) y0 = p[k].y - pad;
+      if (p[k].x + pad > x1) x1 = p[k].x + pad;
+      if (p[k].y + pad > y1) y1 = p[k].y + pad;
+    }
   }
   fc.globalAlpha = 1; ec.globalAlpha = 1;
+  const bx = Math.max(0, Math.floor(x0 / 2) * 2), by = Math.max(0, Math.floor(y0 / 2) * 2);
+  const bx2 = Math.min(w, Math.ceil(x1 / 2) * 2), by2 = Math.min(h, Math.ceil(y1 / 2) * 2);
+  if (!(x1 > x0) || bx2 <= bx || by2 <= by) { dirty = null; return null; }
+  dirty = { x: bx, y: by, w: bx2 - bx, h: by2 - by };
+  return dirty;
 }
 
 // Posición de iconos y cursores de pellizco
-function computeUI(map, now, dt) {
+function computeUI(now, dt) {
   const icons = [], cursors = [];
   for (const key of KEYS) {
     const st = hands[key];
-    const vis = !!st.lm && now - st.lastSeen < CONFIG.HAND_GRACE_MS;
+    const vis = st.has && now - st.lastSeen < CONFIG.HAND_GRACE_MS;
     if (!vis) st.pinch = false;
     const needPose = key === 'Left' || CONFIG.RIGHT_NEEDS_POSE;
     const on = vis && (!needPose || now - st.lastPose < CONFIG.POSE_GRACE_MS);
     st.ui += ((on ? 1 : 0) - st.ui) * (1 - Math.exp(-dt * 12));
-    if (!st.lm) continue;
-    const p = st.lm.map(q => toPx(map, q));
+    if (!st.has) continue;
+    const p = st.px;
     const palmPx = Math.hypot(p[0].x - p[9].x, p[0].y - p[9].y);
     if (st.ui > 0.02) {
-      const c = [0, 5, 9, 13, 17].reduce((s, k) => ({ x: s.x + p[k].x / 5, y: s.y + p[k].y / 5 }), { x: 0, y: 0 });
+      let cx = 0, cy = 0;
+      for (const k of [0, 5, 9, 13, 17]) { cx += p[k].x / 5; cy += p[k].y / 5; }
       const bob = calm ? 0 : Math.sin(now / 450 + (key === 'Left' ? 0 : 2)) * 2.5;
       icons.push({
         key, kind: key === 'Left' ? 'menu' : 'logo',
-        x: c.x, y: c.y - palmPx * 0.12 + bob,
-        r: Math.min(80, Math.max(24, palmPx * 0.5)), a: st.ui,
+        x: cx, y: cy - palmPx * 0.12 + bob,
+        r: Math.min(80, Math.max(24, palmPx * 0.5)), a: st.ui, press: 0,
       });
     }
     if (vis) {
@@ -357,33 +416,40 @@ function drawUI(c, ui, ox) {
   }
 }
 
-let hudAcc = 0, fpsN = 0, fps = 0;
+let hudAcc = 0, fpsN = 0, fps = 0, detMs = 0, rotateShown = false;
 function handText(st, now) {
-  if (!st.lm || now - st.lastSeen > CONFIG.HAND_GRACE_MS) return 'sin detectar';
+  if (!st.has || now - st.lastSeen > CONFIG.HAND_GRACE_MS) return 'sin detectar';
   return (st.info && st.info.pose ? 'pose L' : 'visible') + (st.pinch ? ' + clic' : '');
 }
 
 function render(now, dt) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  $('rotate').hidden = !(state.vr && H > W);
-  if (!video.videoWidth) return;
-
   const vr = state.vr;
+  const showRotate = vr && H > W;
+  if (showRotate !== rotateShown) { rotateShown = showRotate; elRotate.hidden = !showRotate; }
+  if (!video.videoWidth) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); return; }
+
   const ew = vr ? W / 2 : W, eh = H;
   const map = makeMap(video.videoWidth, video.videoHeight, ew, eh, state.zoom);
-  buildHandLayers(map, now, ew, eh);
-  const ui = computeUI(map, now, dt);
+  for (const key of KEYS) if (hands[key].has) updatePx(hands[key], map);
+  const box = buildHandLayers(now, ew, eh);
+  const ui = computeUI(now, dt);
   // Con profundidad > 0 los iconos "flotan" delante de la imagen; las manos fantasma quedan pegadas a tus manos reales
   const eyes = vr ? [{ x: 0, off: state.depth }, { x: W / 2, off: -state.depth }] : [{ x: 0, off: 0 }];
+  if (vr) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); }
   for (const e of eyes) {
     ctx.save();
     ctx.translate(e.x, 0);
     ctx.beginPath(); ctx.rect(0, 0, ew, eh); ctx.clip();
+    if (state.zoom < 1) { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, ew, eh); }
     ctx.drawImage(video, map.ox, map.oy, map.dw, map.dh);
-    ctx.globalAlpha = 0.32; ctx.drawImage(fillC, 0, 0, ew, eh);
-    ctx.globalAlpha = 0.8; ctx.drawImage(edgeC, 0, 0, ew, eh);
-    ctx.globalAlpha = 1;
+    if (box) {
+      ctx.globalAlpha = 0.32;
+      ctx.drawImage(fillC, box.x * dpr, box.y * dpr, box.w * dpr, box.h * dpr, box.x, box.y, box.w, box.h);
+      ctx.globalAlpha = 0.8;
+      ctx.drawImage(edgeC, box.x * dpr, box.y * dpr, box.w * dpr, box.h * dpr, box.x, box.y, box.w, box.h);
+      ctx.globalAlpha = 1;
+    }
     drawUI(ctx, ui, e.off);
     ctx.restore();
   }
@@ -393,28 +459,40 @@ function render(now, dt) {
   if (hudAcc > 0.5) {
     fps = Math.round(fpsN / hudAcc); fpsN = 0; hudAcc = 0;
     if (!vr) {
-      $('hud').textContent = state.landmarker
-        ? `${fps} fps · Izq: ${handText(hands.Left, now)} · Der: ${handText(hands.Right, now)}`
+      elHud.textContent = state.landmarker
+        ? `${fps} fps · detección ${Math.round(detMs)} ms · Izq: ${handText(hands.Left, now)} · Der: ${handText(hands.Right, now)}`
         : (state.note || 'Cargando seguimiento de manos…');
     }
   }
 }
 
-/* ---------- Bucle principal ---------- */
-let lastFrame = 0, lastVT = -1, lastTs = 0;
+/* ---------- Detección y bucle principal ---------- */
+let lastFrame = 0, lastVT = -1, lastTs = 0, useRVFC = false;
+function detect() {
+  if (!state.landmarker || video.readyState < 2 || video.currentTime === lastVT) return;
+  lastVT = video.currentTime;
+  const ts = performance.now();
+  if (ts <= lastTs) return;
+  lastTs = ts;
+  try {
+    updateHands(state.landmarker.detectForVideo(video, ts), ts);
+    detMs += (performance.now() - ts - detMs) * 0.2;
+  } catch (err) { console.warn(err); }
+}
+// Detecta justo cuando llega cada fotograma de la cámara (sin esperar al siguiente repintado)
+function startVideoLoop() {
+  if (typeof video.requestVideoFrameCallback === 'function') {
+    useRVFC = true;
+    const tick = () => { video.requestVideoFrameCallback(tick); detect(); };
+    video.requestVideoFrameCallback(tick);
+  }
+}
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.1, (now - lastFrame) / 1000 || 0.016);
   lastFrame = now;
   if (W !== innerWidth || H !== innerHeight) resize();
-  if (state.landmarker && video.readyState >= 2 && video.currentTime !== lastVT) {
-    lastVT = video.currentTime;
-    const ts = performance.now();
-    if (ts > lastTs) {
-      lastTs = ts;
-      try { updateHands(state.landmarker.detectForVideo(video, ts), now); } catch (err) { console.warn(err); }
-    }
-  }
+  if (!useRVFC) detect();
   render(now, dt);
 }
 
@@ -433,8 +511,8 @@ async function loadLandmarker() {
             runningMode: 'VIDEO',
             numHands: 2,
             minHandDetectionConfidence: 0.5,
-            minHandPresenceConfidence: 0.5,
-            minTrackingConfidence: 0.5,
+            minHandPresenceConfidence: 0.4,
+            minTrackingConfidence: 0.4,   // más bajo = sigue la mano sin volver a buscarla (más rápido)
           });
         } catch (err) { lastErr = err; }
       }
@@ -446,18 +524,22 @@ async function loadLandmarker() {
 /* ---------- Interfaz ---------- */
 async function enterVR() {
   state.vr = true;
-  $('bar').hidden = true; $('hud').hidden = true;
+  $('bar').hidden = true; elHud.hidden = true;
   try { await document.documentElement.requestFullscreen(); } catch (e) {}
   try { await screen.orientation.lock('landscape'); } catch (e) {}
 }
 function exitVR() {
   state.vr = false;
-  $('bar').hidden = false; $('hud').hidden = false;
+  $('bar').hidden = false; elHud.hidden = false;
   try { if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {}
   try { screen.orientation.unlock(); } catch (e) {}
 }
 $('bVr').onclick = enterVR;
-$('bSwap').onclick = () => { state.swap = !state.swap; };
+$('bSwap').onclick = () => {
+  state.swap = !state.swap;
+  try { localStorage.setItem('xrq_swap', state.swap ? '1' : '0'); } catch (e) {}
+  hands.Left = mkHand(); hands.Right = mkHand();
+};
 $('depth').oninput = e => { state.depth = +e.target.value; };
 $('zoom').oninput = e => { state.zoom = +e.target.value / 100; };
 
@@ -487,11 +569,12 @@ $('go').onclick = async () => {
   }
   $('start').hidden = true;
   $('bar').hidden = false;
-  $('hud').hidden = false;
+  elHud.hidden = false;
   try { if (navigator.wakeLock) navigator.wakeLock.request('screen'); } catch (e) {}
   loadLandmarker()
     .then(l => { state.landmarker = l; })
     .catch(err => { console.error(err); state.note = 'No se pudo cargar el seguimiento de manos. Revisa tu conexión.'; });
+  startVideoLoop();
   requestAnimationFrame(frame);
 };
 </script>
